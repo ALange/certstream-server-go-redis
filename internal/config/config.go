@@ -40,6 +40,17 @@ type BufferSizes struct {
 	BroadcastManager int `mapstructure:"broadcastmanager"`
 }
 
+type RedisConfig struct {
+	Enabled   bool   `mapstructure:"enabled"`
+	Addr      string `mapstructure:"addr"`
+	Password  string `mapstructure:"password"`
+	DB        int    `mapstructure:"db"`
+	KeyPrefix string `mapstructure:"key_prefix"`
+	// TTL is the expiry duration (in seconds) for certificate records stored in Redis.
+	// A value of 0 means records never expire.
+	TTL int `mapstructure:"ttl"`
+}
+
 type Config struct {
 	Webserver struct {
 		ServerConfig `mapstructure:",squash"`
@@ -56,6 +67,7 @@ type Config struct {
 		MetricsURL          string `mapstructure:"metrics_url"`
 		ExposeSystemMetrics bool   `mapstructure:"expose_system_metrics"`
 	}
+	Redis   RedisConfig `mapstructure:"redis"`
 	General struct {
 		// DisableDefaultLogs indicates whether the default logs used in Google Chrome and provided by Google should be disabled.
 		DisableDefaultLogs bool `mapstructure:"disable_default_logs"`
@@ -110,6 +122,13 @@ func initViper(configPath string) *viper.Viper {
 	v.SetDefault("prometheus.real_ip", false)
 	v.SetDefault("prometheus.trusted_proxies", []string{})
 	v.SetDefault("prometheus.whitelist", []string{})
+
+	v.SetDefault("redis.enabled", false)
+	v.SetDefault("redis.addr", "localhost:6379")
+	v.SetDefault("redis.password", "")
+	v.SetDefault("redis.db", 0)
+	v.SetDefault("redis.key_prefix", "cert")
+	v.SetDefault("redis.ttl", 86400)
 
 	v.SetDefault("general.disable_default_logs", false)
 	v.SetDefault("general.buffer_sizes.websocket", 300)
