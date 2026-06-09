@@ -16,6 +16,7 @@ import (
 	"github.com/d-Rickyy-b/certstream-server-go/internal/config"
 	"github.com/d-Rickyy-b/certstream-server-go/internal/metrics"
 	"github.com/d-Rickyy-b/certstream-server-go/internal/models"
+	certredis "github.com/d-Rickyy-b/certstream-server-go/internal/redis"
 	"github.com/d-Rickyy-b/certstream-server-go/internal/web"
 
 	ct "github.com/google/certificate-transparency-go"
@@ -83,7 +84,7 @@ func (w *Watcher) Start() {
 
 	log.Println("Started CT watcher")
 
-	go certHandler(w.certChan)
+	go certHandler(w.certChan, initRedisWriter())
 	go w.watchNewLogs()
 
 	// Wait for all workers to finish
@@ -532,8 +533,12 @@ func (w *worker) foundPrecertCallback(rawEntry *ct.RawLogEntry) {
 
 // certHandler takes the entries out of the entryChan channel and broadcasts them to all clients.
 // Only a single instance of the certHandler runs per certstream server.
-func certHandler(entryChan chan models.Entry) {
+func certHandler(entryChan chan models.Entry, redisWriter *certredis.Writer) {
 	var processed uint64
+
+	if redisWriter != nil {
+		defer redisWriter.Close()
+	}
 
 	for {
 		entry := <-entryChan
@@ -543,6 +548,11 @@ func certHandler(entryChan chan models.Entry) {
 			log.Printf("Processed %d entries | Queue length: %d\n", processed, len(entryChan))
 			// Every thousandth entry, we store one certificate as example
 			web.SetExampleCert(entry)
+		}
+
+		// Write the certificate entry to Redis if a writer is configured.
+		if redisWriter != nil {
+			redisWriter.Write(&entry)
 		}
 
 		// Run JSON encoding in the background and send the result to the clients.
@@ -560,6 +570,28 @@ func certHandler(entryChan chan models.Entry) {
 // LogListFetcher defines a function type for fetching a log list. This allows us to inject different
 // implementations (e.g. for testing).
 type LogListFetcher func() (loglist3.LogList, error)
+
+// initRedisWriter creates a Redis writer based on the current AppConfig.
+// Returns nil if Redis is not enabled in the config.
+func initRedisWriter() *certredis.Writer {
+	if !config.AppConfig.Redis.Enabled {
+		return nil
+	}
+
+	writer, err := certredis.NewWriter(config.AppConfig.Redis)
+	if err != nil {
+		log.Printf("Redis: failed to initialize writer, certificates will not be stored in Redis: %v\n", err)
+		return nil
+	}
+
+	log.Printf("Redis: writer initialized (addr=%s, key_prefix=%s, ttl=%ds)\n",
+		config.AppConfig.Redis.Addr,
+		config.AppConfig.Redis.KeyPrefix,
+		config.AppConfig.Redis.TTL,
+	)
+
+	return writer
+}
 
 // googleLogListFetcher fetches the list of all CT logs from Google Chromes CT LogList.
 func googleLogListFetcher() (loglist3.LogList, error) {
